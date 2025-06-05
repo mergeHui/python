@@ -1,0 +1,7 @@
+Django~=5.2.2
+djangorestframework~=3.16.0
+djangorestframework-simplejwt~=5.5.0
+psycopg2-binary~=2.9.10
+# flake8 will be installed in the CI workflow directly, but can be added here too if desired for local use.
+# flake8~=6.0
+# gunicorn # Example for production, not strictly needed for CI testing this way.
