@@ -1,0 +1,101 @@
+name: Django CI
+
+on:
+  push:
+    branches: [ main ] # Adjust if your main branch is different (e.g., master, develop)
+  pull_request:
+    branches: [ main ] # Adjust if your main branch is different
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 4 # Number of concurrent jobs
+      matrix:
+        python-version: ['3.9', '3.10', '3.11'] # Test against a few relevant Python versions
+
+    services:
+      postgres:
+        image: postgres:13-alpine # Use a specific version of PostgreSQL
+        env:
+          POSTGRES_DB: test_audit_db        # Corresponds to settings.py DATABASES NAME
+          POSTGRES_USER: test_audit_user    # Corresponds to settings.py DATABASES USER
+          POSTGRES_PASSWORD: test_audit_password # Corresponds to settings.py DATABASES PASSWORD
+        ports:
+          - 5432:5432 # Map container port to host for the job
+        # Health check for the PostgreSQL service
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4 # Updated to v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4 # Updated to v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install System Dependencies (if any)
+      run: |
+        # Example: sudo apt-get update && sudo apt-get install -y libpq-dev gcc
+        # psycopg2-binary usually doesn't need libpq-dev, but if using psycopg2 (source) it would.
+        echo "No system dependencies needed for psycopg2-binary beyond build essentials typically present."
+
+
+    - name: Install Python Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Run Flake8 Linter
+      run: |
+        pip install flake8
+        # Stop the build if there are Python syntax errors or undefined names
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        # Optionally, add more checks but don't exit on them, just report
+        # flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+    - name: Run Django Tests
+      env:
+        # General Django Settings
+        SECRET_KEY: 'ci_test_secret_key_for_django_project_!@#$%^&*()_12345' # Dummy secret key for CI
+        DEBUG: 'False' # Run tests with production-like debug settings
+
+        # Database settings to use the PostgreSQL service container
+        DB_ENGINE: 'django.db.backends.postgresql'
+        DB_NAME: 'test_audit_db'
+        DB_USER: 'test_audit_user'
+        DB_PASSWORD: 'test_audit_password'
+        DB_HOST: 'localhost' # The service is mapped to localhost of the runner
+        DB_PORT: '5432'      # The service's port 5432 is mapped to the runner's 5432
+
+        # Media Settings (optional, if your tests interact with media files)
+        # MEDIA_ROOT: '/tmp/media_root_ci/' # Example, ensure this path is writable
+
+        # Python Path (if manage.py is not in the root of where commands are run)
+        # PYTHONPATH: ${{ github.workspace }}/audit_system
+        # Not usually needed if `cd` is used correctly.
+
+      run: |
+        echo "Navigating to Django project directory..."
+        cd audit_system # Navigate into the Django project directory where manage.py is
+
+        echo "Running makemigrations check (should be no changes if committed)..."
+        # In CI, it's better to ensure migrations are already created and committed.
+        # This command can be used to fail if there are uncommitted migration changes:
+        # python manage.py makemigrations --check --dry-run
+        # For now, just run it to create them if they were somehow missed.
+        python manage.py makemigrations audit_management
+
+        echo "Applying migrations..."
+        python manage.py migrate
+
+        echo "Running tests..."
+        python manage.py test audit_management # Specify the app to test
+        # Or run all tests: python manage.py test
+        # Use --verbosity=2 for more detailed test output if needed
+        # python manage.py test audit_management --verbosity=2
